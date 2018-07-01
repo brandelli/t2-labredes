@@ -38,47 +38,26 @@
 #define SRC_MAC3	0x43
 #define SRC_MAC4	0x8d
 #define SRC_MAC5	0x2a
-
-#define DHCP_DISCOVER 1
-#define DHCP_OFFER    2
-#define DHCP_REQUEST  3
-#define DHCP_ACK      5
 	
 unsigned char buff1[BUFFSIZE]; // buffer de recepcao
 
 int sockd;
 int on;
 struct ifreq ifr;
-struct boothdr
-{
-   char msg_type;
-   char hdr_type;
-   char hdr_len;
-   char hops;
-};
-
-void print_ip(int ip)
-{
-    unsigned char bytes[4];
-    bytes[0] = ip & 0xFF;
-    bytes[1] = (ip >> 8) & 0xFF;
-    bytes[2] = (ip >> 16) & 0xFF;
-    bytes[3] = (ip >> 24) & 0xFF;   
-    printf("%d.%d.%d.%d\n", bytes[0], bytes[1], bytes[2], bytes[3]);        
-}
 
 int main(int argc,char *argv[])
 {
 	struct ether_header *eh = (struct ether_header *) buff1;
 	struct iphdr *iph = (struct iphdr *) (buff1 + sizeof(struct ether_header));
 	struct udphdr *udph = (struct udphdr *) (buff1 + sizeof(struct iphdr) + sizeof(struct ether_header));
-   struct boothdr *booth = (struct boothdr *) (buff1 + sizeof(struct udphdr) + sizeof(struct iphdr) + sizeof(struct ether_header));
 	FILE *fp;
-   int dhcp_status = DHCP_DISCOVER;
-   if((sockd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0) {
-      printf("Erro na criacao do socket.\n");
-      exit(1);
-   }
+	short ipFlags = 0;
+	short ipOffset;
+	char moreFragments;
+    if((sockd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0) {
+       printf("Erro na criacao do socket.\n");
+       exit(1);
+    }
 
 	strcpy(ifr.ifr_name, "wlp2s0");
 	if(ioctl(sockd, SIOCGIFINDEX, &ifr) < 0)
@@ -86,62 +65,114 @@ int main(int argc,char *argv[])
 	ioctl(sockd, SIOCGIFFLAGS, &ifr);
 	ifr.ifr_flags |= IFF_PROMISC;
 	ioctl(sockd, SIOCSIFFLAGS, &ifr);
-   ioctl(sockd, SIOCGIFADDR, &ifr);
-   printf("%s\n", inet_ntoa(( (struct sockaddr_in *)&ifr.ifr_addr )->sin_addr) );
+
+	int arrOffset[44];
+	int counter = 0;
+	int lastFragment = -1;
+	char fullData[65365];
 	// recepcao de pacotes
-	// recepcao de pacotes
-   printf("meu ip");
-   printf("%s\n", inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
-   print_ip((long)&ifr.ifr_addr);
-   print_ip((long)&ifr.ifr_dstaddr);
-   print_ip((long)&ifr.ifr_broadaddr);
-   print_ip((long)&ifr.ifr_netmask);
-   printf("%s\n", ifr.ifr_name);
-   printf("Tamanho ethernet %ld\n",sizeof(struct ether_header));
-   printf("Tamanho ip %ld\n",sizeof(struct iphdr));
-   printf("Tamanho udp %ld\n",sizeof(struct udphdr));
-   printf("Tamanho boot %ld\n",sizeof(struct boothdr));
-   while (1) {
-      recv(sockd,(char *) &buff1, sizeof(buff1), 0x0);
-      switch (dhcp_status)
-      {
-         case DHCP_DISCOVER:
-            if(iph->protocol == 17 && udph->source == htons(68) && udph->dest == htons(67)){
-               printf("DHCP_DISCOVER\n");
-               // impress�o do conteudo - exemplo Endereco Destino e Endereco Origem   
-               //printf("MAC Destino: %x:%x:%x:%x:%x:%x \n", buff1[0],buff1[1],buff1[2],buff1[3],buff1[4],buff1[5]);
-               //printf("MAC Origem:  %x:%x:%x:%x:%x:%x \n", buff1[6],buff1[7],buff1[8],buff1[9],buff1[10],buff1[11]);
-               printf("IP Source: ");
-               print_ip(iph->saddr);
-               printf("IP Destiny: ");
-               print_ip(iph->daddr);
+	while (1) {
+   		recv(sockd,(char *) &buff1, sizeof(buff1), 0x0);
+   		if(eh->ether_dhost[0] == DEST_MAC0 &&
+   			eh->ether_dhost[1] == DEST_MAC1 &&
+   			eh->ether_dhost[2] == DEST_MAC2 &&
+   			eh->ether_dhost[3] == DEST_MAC3 &&
+   			eh->ether_dhost[4] == DEST_MAC4 &&
+   			eh->ether_dhost[5] == DEST_MAC5 &&
+   			eh->ether_shost[0] == SRC_MAC0 &&
+   			eh->ether_shost[1] == SRC_MAC1 &&
+   			eh->ether_shost[2] == SRC_MAC2 &&
+   			eh->ether_shost[3] == SRC_MAC3 &&
+   			eh->ether_shost[4] == SRC_MAC4 &&
+   			eh->ether_shost[5] == SRC_MAC5)
+   		{
+	   		printf("pacote novo\n");
+			printf("ethernet frame\n");
+			printf("MAC Destino: %x:%x:%x:%x:%x:%x \n", eh->ether_dhost[0],eh->ether_dhost[1],eh->ether_dhost[2],eh->ether_dhost[3],eh->ether_dhost[4],eh->ether_dhost[5]);
+			printf("MAC Origem:  %x:%x:%x:%x:%x:%x \n", eh->ether_shost[0],eh->ether_shost[1],eh->ether_shost[2],eh->ether_shost[3],eh->ether_shost[4],eh->ether_shost[5]);
+			printf("ether type: %x\n",eh->ether_type);
+   			printf("ip frame\n");
+   			printf("id: %d\n", iph->id);
+   			ipFlags = ntohs(iph->frag_off);
+   			ipOffset = ipFlags << 3;
+   			ipOffset = (ipOffset >> 3) * 8;
+   			moreFragments = (ipFlags >> 13) & 1;
 
-               printf("UDP port source: %d \n", ntohs(udph->source));
-               printf("UDP port dest: %d \n", ntohs(udph->dest));
-               printf("Message Type: %d \n", booth->msg_type);
-               printf("hardware Type: %d \n", booth->hdr_type);
-               printf("hardware address length: %d \n", booth->hdr_len);
-               printf("hops: %d \n", booth->hops);
-               printf("--------------------------------------------------\n");
-               dhcp_status = DHCP_REQUEST;
+   			if(!moreFragments && ntohs(iph->tot_len) < 1500){
+   				printf("ultimo pacote\n");
+   				if(counter == 0)
+   					arrOffset[counter] = 0;
+   				else
+   					arrOffset[counter] = (ipOffset / 1480);
+   			}else{
+   				printf("pacotes intermediarios\n");
+   				arrOffset[counter] = ipOffset / 1480;
+   			}
 
-            }
-         break;
+   			if(!moreFragments)
+   				lastFragment = arrOffset[counter]; 
 
-         case DHCP_REQUEST:
-           printf("DHCP_REQUEST\n");
-           dhcp_status = DHCP_OFFER;
-         break;
+   			printf("array Offset: %d\n", arrOffset[counter]);
+   			printf("last Fragment: %d\n", lastFragment);
+   			
+   			printf("ip Offset: %d \n", ipOffset);
+   			printf("ip protocol: %d \n", iph->protocol);
+   			printf("total length: %d\n", ntohs(iph->tot_len));
+   			//verificar essa linha para cabeçalho
+   			//int udpHeaderSize = ipOffset ? 0 : 8;
+   			int udpHeaderSize = 0;
+   			int etherHeaderSize = 14;
+   			int ipHeaderSize = 20;
+   			int dataLength = ntohs(iph->tot_len) - udpHeaderSize - ipHeaderSize;
+   			printf("dataLength: %d \n", dataLength); 
+   			char *data = (char *) (buff1 + ipHeaderSize + etherHeaderSize + udpHeaderSize);
+   			printf("data\n");
 
-         case DHCP_OFFER:
-           printf("DHCP_OFFER\n");
-           dhcp_status = DHCP_ACK;
-         break;
+   			int nFragment = arrOffset[counter];
+   			int startData = arrOffset[counter] * 1480;
+   			int endData = 0;
+   			if(!moreFragments)
+   				endData = startData + dataLength;
+   			else
+   				endData = startData + 1480;
 
-         case DHCP_ACK:
-           printf("DHCP_ACK\n");
-           dhcp_status = 0;
-         break;
-      }
-   }
+   			int j = 0;
+   			printf("startData: %d\n", startData);
+   			printf("endData: %d\n", endData);
+   			for(int i=startData;i<endData;i++){
+   				//printf("laco for position: %d\n", i);
+   				fullData[i] = data[j];
+   				//printf("%c", fullData[(counter*1480)+i]);
+   				j++;
+   			}
+
+
+
+
+   			printf("more fragments: %d\n", moreFragments);
+   			printf("contador de pacotes: %d\n", counter);
+   			counter++;
+   			if(!moreFragments && (counter == lastFragment+1)){
+   				printf("comeco a colocar dados no arquivo\n");
+   				int sizeFullData = (int)strlen(fullData+8);
+   				printf("size of fullData %d \n", sizeFullData);
+	   			fp = fopen("recebido.txt", "w");
+
+	   			for (int i = 0; i < sizeFullData; i++)
+	   			{
+	   				//printf("posição do arquivo: %d -> ", i);
+	   				fputc(fullData[i+8], fp);
+	   				//printf("%c \n", fullData[i+8]);
+	   			}
+	   			printf("\n");
+	   			fclose(fp);
+	   			printf("fim data\n");
+	   			arrOffset[44];
+	   			counter = 0;
+	   			lastFragment = -1;
+   			}
+
+   			printf("\n\n");
+   		}
+	}
 }
