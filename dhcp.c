@@ -331,7 +331,16 @@ int main(int argc,char *argv[])
             booth->options[option_index++] = iph->saddr >> 16;
             booth->options[option_index++] = iph->saddr >> 24;
 
-            //option 3 router
+            //option 6 dns
+            booth->options[option_index++] = 6 & 0xFF;
+            //length da option 2
+            booth->options[option_index++] = 4 & 0xFF;
+            //broadcast address
+            booth->options[option_index++] = iph->saddr >> 0;
+            booth->options[option_index++] = iph->saddr >> 8;
+            booth->options[option_index++] = iph->saddr >> 16;
+            booth->options[option_index++] = iph->saddr >> 24;
+
             booth->options[option_index++] = 0xFF;
 
             socket_address.sll_ifindex = if_idx.ifr_ifindex;
@@ -499,6 +508,16 @@ int main(int argc,char *argv[])
            booth->options[option_index++] = iph->saddr >> 16;
            booth->options[option_index++] = iph->saddr >> 24;
 
+           //option 6 dns
+           booth->options[option_index++] = 6 & 0xFF;
+           //length da option 2
+           booth->options[option_index++] = 4 & 0xFF;
+           //broadcast address
+           booth->options[option_index++] = iph->saddr >> 0;
+           booth->options[option_index++] = iph->saddr >> 8;
+           booth->options[option_index++] = iph->saddr >> 16;
+           booth->options[option_index++] = iph->saddr >> 24;
+           
            //option 3 router
            booth->options[option_index++] = 0xFF;
 
